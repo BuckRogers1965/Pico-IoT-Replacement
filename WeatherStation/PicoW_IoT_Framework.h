@@ -72,7 +72,7 @@
   def.items[i].read_callback = NULL; \
   i++;
 
-#define MAX_REGISTRY_ITEMS 255
+#define MAX_REGISTRY_ITEMS 64
 #define HISTORY_SIZE 180
 
 enum ItemType { TYPE_SENSOR_GENERIC,
@@ -104,8 +104,8 @@ RegistryDef app_register_items();  // forward declaration — implemented in Wea
 
 class Registry {
 private:
-  RegistryItem items0[MAX_REGISTRY_ITEMS];  // Core 0's copy
-  RegistryItem items1[MAX_REGISTRY_ITEMS];  // Core 1's copy
+  RegistryItem items0[MAX_REGISTRY_ITEMS];
+  RegistryItem items1[MAX_REGISTRY_ITEMS];
   uint32_t dirty0[(MAX_REGISTRY_ITEMS + 31) / 32] = { 0 };
   uint32_t dirty1[(MAX_REGISTRY_ITEMS + 31) / 32] = { 0 };
   int send_cursor0 = 0;
@@ -121,7 +121,6 @@ private:
   int& sendCursor() {
     return get_core_num() == 0 ? send_cursor0 : send_cursor1;
   }
-
   void setDirty(uint8_t id) {
     dirty()[id / 32] |= (1u << (id % 32));
   }
@@ -141,47 +140,87 @@ public:
     Serial.printf(">> Registry Begin: Item Count: %d\n", count);
     deepCopy();
   }
+
   int getCount() {
     return count;
   }
-  RegistryItem* getItem(int i) {
-    return &items()[i];
-  }  // ← add this
-  void set(uint8_t id, float val) {
-    setDirty(id);
-    update(id, val);
+
+  // -----------------------------------------------------------------------
+  // NAME LOOKUP
+  // -----------------------------------------------------------------------
+
+  uint8_t nameToIdx(const char* id_str) {
+    for (int i = 0; i < count; i++)
+      if (strcmp(items()[i].id, id_str) == 0) return (uint8_t)i;
+    Serial.printf(">> Registry ERROR: nameToIdx() could not find id '%s'\n", id_str);
+    return 255;
   }
 
-  void update(uint8_t id, float val) {
+  const char* idxToName(uint8_t id) {
+    if (id < count) return items()[id].id;
+    Serial.printf(">> Registry ERROR: idxToName() index %d out of range\n", id);
+    return nullptr;
+  }
+
+  // -----------------------------------------------------------------------
+  // CORE IMPLEMENTATION — keyed by numeric index
+  // -----------------------------------------------------------------------
+
+  RegistryItem* getItem_id(uint8_t id) {
+    if (id < count) return &items()[id];
+    Serial.printf(">> Registry ERROR: getItem_id() index %d out of range\n", id);
+    return nullptr;
+  }
+
+  void set_id(uint8_t id, float val) {
+    if (id >= count) {
+      Serial.printf(">> Registry ERROR: set_id() index %d out of range\n", id);
+      return;
+    }
+    setDirty(id);
+    items()[id].value = val;
+  }
+
+  float get_id(uint8_t id, float default_val = 0.0f) {
+    if (id < count) return items()[id].value;
+    Serial.printf(">> Registry ERROR: get_id() index %d out of range\n", id);
+    return default_val;
+  }
+
+  void update_id(uint8_t id, float val) {
     if (id < count) items()[id].value = val;
   }
 
-  float get(uint8_t id, float default_val = 0.0f) {
-    if (id < count) return items()[id].value;
-    return default_val;
+  // -----------------------------------------------------------------------
+  // NAME-BASED WRAPPERS
+  // -----------------------------------------------------------------------
+
+  RegistryItem* getItem(const char* id_str) {
+    uint8_t i = nameToIdx(id_str);
+    if (i == 255) return nullptr;
+    return getItem_id(i);
   }
 
-  int find(const char* id_str) {
-    for (int i = 0; i < count; i++)
-      if (strcmp(items()[i].id, id_str) == 0) return i;
-    return -1;
+  // legacy numeric overload — kept for autoScheduleSensors() loop
+  RegistryItem* getItem(int i) {
+    return getItem_id((uint8_t)i);
   }
 
   void set(const char* id_str, float val) {
-    int i = find(id_str);
-    if (i != -1) set((uint8_t)i, val);
-  }
-
-  void update(const char* id_str, float val) {
-    int i = find(id_str);
-    if (i != -1) update((uint8_t)i, val);
+    uint8_t i = nameToIdx(id_str);
+    if (i == 255) return;
+    set_id(i, val);
   }
 
   float get(const char* id_str, float default_val = 0.0f) {
-    int i = find(id_str);
-    if (i != -1) return items()[i].value;
-    return default_val;
+    uint8_t i = nameToIdx(id_str);
+    if (i == 255) return default_val;
+    return get_id(i, default_val);
   }
+
+  // -----------------------------------------------------------------------
+  // INTER-CORE SYNC
+  // -----------------------------------------------------------------------
 
   void deepCopy() {
     memcpy(items1, items0, sizeof(RegistryItem) * count);
@@ -200,7 +239,7 @@ public:
       msg_set_type(msg, MSG_VALUE_SYNC);
       msg_set_id(msg, (uint8_t)i);
       float_to_msg(items()[i].value, msg);
-      if (!fifo_send(msg)) return;  // FIFO full, dirty flag stays set, retry next firing
+      if (!fifo_send(msg)) return;
       Serial.printf(">> FIFO PUSH [Core %d]: Item %d (%s) = %.2f\n", get_core_num(), i, items()[i].id, items()[i].value);
       clearDirty(i);
     }
@@ -212,7 +251,7 @@ public:
       if (!fifo_recv(msg)) return;
       if (msg_get_type(msg) == MSG_NONE) return;
       Serial.printf("<< FIFO POP  [Core %d]: Item %d = %.2f\n", get_core_num(), msg_get_id(msg), msg_to_float(msg));
-      update(msg_get_id(msg), msg_to_float(msg));
+      update_id(msg_get_id(msg), msg_to_float(msg));
     }
   }
 };
@@ -502,19 +541,19 @@ void startConfigMode() {
 }
 
 static void autoScheduleSensors() {
-  Serial.println(">> Starting autoScheduleSensors");
-  for (int i = 0; i < registry.getCount(); i++) {
-    RegistryItem* item = registry.getItem(i);
-
-    // Check if it's an auto-polling sensor
-    if (item->type <= TYPE_SENSOR_STATE && item->update_interval_ms > 0 && item->read_callback != NULL) {
-
-      // Use the interval defined in the registry to schedule the first run
-      AddTaskMilli(CreateTask(), item->update_interval_ms, item->read_callback, i, 0);
-
-      Serial.printf("Auto-scheduled sensor '%s' at %dms interval\n", item->id, item->update_interval_ms);
+    Serial.printf(">> autoScheduleSensors() count=%d\n", registry.getCount());
+    for (int i = 0; i < registry.getCount(); i++) {
+        RegistryItem* item = registry.getItem_id(i);
+        if (!item) continue;
+        Serial.printf(">> item[%d] id='%s' type=%d interval=%lu callback=%s\n", 
+            i, item->id, item->type, item->update_interval_ms, 
+            item->read_callback ? "SET" : "NULL");
+        if (item->type <= TYPE_SENSOR_STATE && item->update_interval_ms > 0 && item->read_callback != NULL) {
+            uint32_t delay = item->update_interval_ms + 10000 + i * 1000;
+            Serial.printf(">> scheduling item[%d] '%s' with delay=%lu mesgid=%d\n", i, item->id, delay, i);
+            AddTaskMilli(CreateTask(), delay, item->read_callback, i, 0);
+        }
     }
-  }
 }
 
 // ============================================================================
@@ -575,7 +614,7 @@ void loop() {
   server.handleClient();
   registry.recvUpdates();
   registry.sendDirty();
-  delay(100);
+  best_effort_wfe_or_timeout(make_timeout_time_ms(101));
 }
 void setup1() {
   randomSeed(1000);
@@ -588,7 +627,7 @@ void loop1() {
   DoTasks();
   registry.recvUpdates();
   registry.sendDirty();
-  delay(100);
+  delay(10);
 }
 
 #endif

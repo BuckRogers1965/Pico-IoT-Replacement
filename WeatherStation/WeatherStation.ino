@@ -22,8 +22,6 @@
 // 3. DEFINE GLOBALS REQUIRED BY THE FRAMEWORK
 // ============================================================================
 
-struct _task_entry_type* sensor_tasks[MAX_REGISTRY_ITEMS];
-
 String ssid_setting;
 String pass_setting;
 String device_name_setting = "Weather Station";
@@ -50,9 +48,23 @@ BH1750 lightMeter(0x23);
 // 6. PROJECT-SPECIFIC FUNCTIONS
 // ============================================================================
 
-int blinkLED(struct _task_entry_type* task, int led, int mesgid) {
+int blinkLED(struct _task_entry_type* task, int mesgid, int led) {
     digitalWrite(led, mesgid == 1 ? HIGH : LOW);
     AddTaskMilli(task, 500, &blinkLED, mesgid == 1 ? 2 : 1, led);
+    return 0;
+}
+
+int readFreeRAM(struct _task_entry_type* task, int idx, int idx2) {
+    AddTaskMilli(task, registry.getItem_id(idx)->update_interval_ms, &readFreeRAM, idx, 0);
+
+    float total_ram = 270336.0f; 
+    float free_bytes = (float)rp2040.getFreeHeap();
+    float percent = (free_bytes / total_ram) * 100.0f;
+
+    registry.set_id(idx, percent);
+        Serial.printf(">> readFreeRAM fired idx=%d\n", idx);
+
+    Serial.printf(">> RAM Free: %.2f %% interval_ms: %lu index: %d index2: %d \n", percent, registry.getItem_id(idx)->update_interval_ms, idx, idx2);
     return 0;
 }
 
@@ -63,24 +75,24 @@ AM2302::AM2302_Sensor am2302a{SENSOR_PINa};
 AM2302::AM2302_Sensor am2302b{SENSOR_PINb};
 
 int readAM2302a_temp(struct _task_entry_type* task, int idx, int) {
-    AddTaskMilli(task, registry.getItem(idx)->update_interval_ms, &readAM2302a_temp, idx, 0);
+    AddTaskMilli(task, registry.getItem_id(idx)->update_interval_ms, &readAM2302a_temp, idx, 0);
     
     am2302a.read();
     float temp = am2302a.get_Temperature() * 1.8 + 32;
     if (temp > 180) return 0;
-    registry.set("temp_a", temp);
+    registry.set_id(idx, temp);
     //Serial.printf(">> readAM2302a_temp: %.2f °F\n", temp);
 
     return 0;
 }
 
 int readAM2302a_humidity(struct _task_entry_type* task, int idx, int) {
-    AddTaskMilli(task, registry.getItem(idx)->update_interval_ms, &readAM2302a_humidity, idx, 0);
+    AddTaskMilli(task, registry.getItem_id(idx)->update_interval_ms, &readAM2302a_humidity, idx, 0);
     
     am2302a.read();
     float humidity = am2302a.get_Humidity();
     if (humidity < 0.3) return 0;
-    registry.set("humidity_a", humidity);
+    registry.set_id(idx, humidity);
 
     return 0;
 }
@@ -89,10 +101,11 @@ int readAM2302a_humidity(struct _task_entry_type* task, int idx, int) {
 CPU cpu;
 
 int readCPUTemp(struct _task_entry_type* task, int idx, int) {
-    float cpu_temp = cpu.getTemperature() * 1.8 + 32;
-    registry.set("cpu_temp_f", cpu_temp);
+    AddTaskMilli(task, registry.getItem_id(idx)->update_interval_ms, &readCPUTemp, idx, 0);
 
-    AddTaskMilli(task, registry.getItem(idx)->update_interval_ms, &readCPUTemp, idx, 0);
+    float cpu_temp = cpu.getTemperature() * 1.8 + 32;
+    registry.set_id (idx, cpu_temp);
+
     return 0;
 }
 
@@ -100,10 +113,10 @@ int readCPUTemp(struct _task_entry_type* task, int idx, int) {
 
 
 int readLightSensor(struct _task_entry_type* task, int idx, int) {
-    AddTaskMilli(task, registry.getItem(idx)->update_interval_ms, &readLightSensor, idx, 0);
+    AddTaskMilli(task, registry.getItem_id(idx)->update_interval_ms, &readLightSensor, idx, 0);
  
     float lux = lightMeter.readLightLevel();
-    registry.set("light_lux", lux);
+    registry.set_id(idx, lux);
 
    return 0;
 }
@@ -146,17 +159,18 @@ RegistryDef app_register_items() {
     //SENSOR_AUTO("soil_moisture", "Soil Moisture", 300000, "%", readSoilMoisture);
     //SENSOR_AUTO("wind_direction", "Wind Direction", 2000, "°", readWindVane);
     //SENSOR_AUTO("wind_speed", "Wind Speed", 1000, "mph", calculateWindAndRain);
-    SENSOR_AUTO("temp_a",     "Temperature A", 6000, "°F", readAM2302a_temp);
-    SENSOR_AUTO("humidity_a", "Humidity A",    6000, "%",  readAM2302a_humidity);
-    SENSOR_AUTO("cpu_temp_f", "CPU Temperature", 12000, "°F", readCPUTemp);
+    SENSOR_AUTO("temp_a",     "Temperature A",    6004, "°F", readAM2302a_temp);
+    SENSOR_AUTO("humidity_a", "Humidity A",       7003,  "%", readAM2302a_humidity);
+    SENSOR_AUTO("cpu_temp_f", "CPU Temperature",  8002, "°F", readCPUTemp);
+    SENSOR_AUTO("free_ram",   "Free RAM",         9001,  "%", readFreeRAM);
     
     // Manually updated sensors (Updated by other callbacks or logic)
     //SENSOR_MANUAL("temp_c", "Temperature (C)", "°C");
     //SENSOR_MANUAL("humidity", "Humidity", "%");
     //SENSOR_MANUAL("pressure_hpa", "Pressure (hPa)", "hPa");
     //SENSOR_MANUAL("rainfall", "Rainfall", "in");
-    //SENSOR_MANUAL("heat_index", "Heat Index", "°F");
-    //SENSOR_MANUAL("dew_point_f", "Dew Point", "°F");
+    SENSOR_MANUAL("heat_index", "Heat Index", "°F");
+    SENSOR_MANUAL("dew_point_f", "Dew Point", "°F");
     //SENSOR_MANUAL("irrigation_status", "Irrigation Status", "");
     //SENSOR_MANUAL("next_water_sec", "Next Water In", "sec");
 
