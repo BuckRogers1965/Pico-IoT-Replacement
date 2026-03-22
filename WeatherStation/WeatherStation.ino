@@ -184,6 +184,83 @@ RegistryDef app_register_items() {
     return def;
 }
 
+// ============================================================================
+// LAYOUT TABLE  (the View Definition — completely separate from the registry)
+//
+// Declares pages, cards, and widgets. References registry items by string id.
+// The framework resolves those strings to numeric indices once at boot.
+// This layout mirrors the original 4-card layout exactly.
+// ============================================================================
+
+const LayoutNode layout_table[] = {
+    // id               parent_id       name                 registry_id         widget      props
+    {"root",            "",             "Root",              "",                  W_ROOT,     ""},
+
+    // Two pages
+    {"main_page",       "root",         "Weather Station",   "",                  W_PAGE,     ""},
+    {"system_page",     "root",         "System",            "",                  W_PAGE,     ""},
+
+    // Main page cards
+    {"sensor_card",     "main_page",    "Live Sensors",      "",                  W_CARD,     "width:400"},
+    {"control_card",    "main_page",    "Controls",          "",                  W_CARD,     ""},
+    {"settings_card",   "main_page",    "Settings",          "",                  W_CARD,     ""},
+
+    // System page cards
+    {"status_card",     "system_page",  "Status",            "",                  W_CARD,     ""},
+
+    // Sensor card
+    {"w_temp_a",        "sensor_card",  "Temperature A",     "temp_a",            W_TEXT,     ""},
+    {"help_temp",       "sensor_card",  "",                  "",                  W_HELP,     ""},
+    {"w_humidity_a",    "sensor_card",  "Humidity A",        "humidity_a",        W_TEXT,     ""},
+    {"help_humidity",   "sensor_card",  "",                  "",                  W_HELP,     ""},
+    {"w_heat_index",    "sensor_card",  "Heat Index",        "heat_index",        W_TEXT,     ""},
+    {"w_dew_point",     "sensor_card",  "Dew Point",         "dew_point_f",       W_TEXT,     ""},
+    {"w_temp_a",        "sensor_card",  "Temperature A",     "temp_a",            W_DIAL,     "min:0,max:120"},
+    {"help_temp",       "sensor_card",  "",                  "",                  W_HELP,     ""},
+    {"w_humidity_a",    "sensor_card",  "Humidity A",        "humidity_a",        W_BAR,      "min:0,max:100"},
+    {"help_humidity",   "sensor_card",  "",                  "",                  W_HELP,     ""},
+    {"sensor_card_info", "sensor_card", "",                  "",                  W_HTML,     ""},
+
+    // Status card — same items that landed in the status card before
+    {"w_cpu_temp",      "status_card",  "CPU Temperature",   "cpu_temp_f",        W_TEXT,     ""},
+    {"w_free_ram",      "status_card",  "Free RAM",          "free_ram",          W_TEXT,     ""},
+
+    // Controls card — sliders
+    {"w_moist_tgt",     "control_card", "Target Moisture",   "moisture_target",   W_SLIDER,   ""},
+    {"w_water_dur",     "control_card", "Water Duration",    "water_duration",    W_SLIDER,   ""},
+    {"w_water_cool",    "control_card", "Min Time Between",  "water_cooldown",    W_SLIDER,   ""},
+
+    // Settings card — button
+    {"w_water_now",     "settings_card","Manual Water",      "water_now",         W_BUTTON,   ""},
+};
+
+const int layout_count = sizeof(layout_table) / sizeof(LayoutNode);
+
+// ============================================================================
+// HELP TABLE  (static HTML strings streamed as hover tooltip content)
+// Reference these from the layout_table using W_HELP and the help node id.
+// ============================================================================
+
+const HelpNode help_table[] = {
+    {"help_temp",
+     "<b>Temperature A</b><br>AM2302 sensor on GPIO 2.<br>Range: -40 to 80&deg;C / -40 to 176&deg;F.<br>Updates every ~6 seconds."},
+
+    {"help_humidity",
+     "<b>Humidity A</b><br>AM2302 sensor on GPIO 2.<br>Range: 0&ndash;100% RH.<br>Updates every ~7 seconds."},
+
+    {"help_moisture_target",
+     "<b>Target Moisture</b><br>The soil moisture % the irrigation system will try to maintain.<br>When soil drops below this value, watering begins."},
+
+    {"help_water_now",
+     "<b>Manual Water</b><br>Triggers an immediate watering cycle regardless of current soil moisture."},
+    
+    {"sensor_card_info",
+     "<p><strong>Outdoor Conditions</strong></p><p>Live readings from the <strong>AM2302</strong> sensor on GPIO 2. Temperature and humidity are polled every 6&ndash;7 seconds. <strong>Heat Index</strong> and <strong>Dew Point</strong> are calculated from those readings.</p><p style='color:#888;font-size:.85em'>Sensor range: -40 to 80&deg;C &bull; 0&ndash;100% RH</p>"},
+    
+};
+
+const int help_count = sizeof(help_table) / sizeof(HelpNode);
+
 void app_get_default_identity(String& name, String& prefix) {
     Serial.println(">> Starting app_get_default_identity");
     name = "Weather Station"; 
